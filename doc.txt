@@ -1,0 +1,68 @@
+****instead of using interval tree, consider using range tree to maintain representation for module/classes
+****后来看了下 不用pipe来ipc，直接用stdin和stdout就行了
+
+1. 环境
+
+使用node v20.10.0, 如果和已有的版本不匹配，用nvm
+
+follow this https://code.visualstudio.com/api/get-started/your-first-extension for debugging
+demo是用ts写的 但是debug是一样的
+
+2. extension.js
+
+js的syntax其实还好，有gpt4有copilot就差不多了，用的多的比较奇怪的syntax就forEach
+
+几个关键词：
+1. js event based programming (可以问问gpt和传统的有啥区别)
+2. disposable? subscription? 为什么叫disposable，为什么用完了要push到subscription
+3. 记住async 里才能用 await，如果一个inner function是async的，那整个function也必须是async
+
+还没想好的minor点：
+因为： "activationEvents": [],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [{
+      "command": "codemap.helloWorld",
+      "title": "Hello World"
+    }]
+  },
+--package.json, 所以目前只能用helloWorld启动extension，问问gpt怎么直接启动或者又没有什么其他方式启动
+
+主要逻辑：
+
+global var：有一个avl interval tree, which is both an avl tree and an interval tree
+可以efficiently handle
+
+每次user highlight一个function的时候，先get definition，然后看这个definition的location是不是已经在
+interval tree里了，如果是，那就get这个node的content
+
+https://code.visualstudio.com/api/references/commands
+核心依赖：
+以下的每一个都要用这个vscode.commands.executeCommand("...")
+            eg. vscode.commands.executeCommand("vscode.prepareCallHierarchy")
+vscode.executeDefinitionProvider
+vscode.prepareCallHierarchy 这个给你一个list of hierarchy item (通常可以assume length为1，如果大于1，说明method有naming conflict, 优先找离自己document最近的.时间紧张可以先只handle length为0和0以上的case)，用下面两个method要用hierarchy item
+vscode.provideOutgoingCalls 这个告诉你这个function/class里call了什么其他的function/class
+(vscode.provideIncomingCalls) 这个告诉你这个function/class 在哪里被call过, 
+
+provideOutgoingCalls返回的是
+
+iterate through provideOutgoingCalls 返回的这个list，
+每次先executeDefinitionProvider，会返回一个uri和location. 
+用location的range.line update在interval tree里这个function的range
+
+然后用这个uri和locaiton call prepareCallHierarchy和
+provideOutgoingCalls，so on and so forth. 
+
+次要依赖：依赖indent to figure out blocks, 跑之前先format code
+
+如果getDefinition返回null了，就不recurse了，当所有recursion停下来的时候sort一下currContext based on range
+同一个module里的放一起，linenumber大的放后面，有overlap就合起来。这样最后可以拼接成一整个大text string，
+看看这个玩意儿多长，要是太长了就先一个一个summarize再最后给codellama，要是不是很长就直接给。
+剩下的这次见过的function也陆陆续续丢进codellama，但先返回，后用async丢给codellama inference，把summarization记下来
+
+every minute or every time you deactivate this extension, save the jsonified avl interval tree in codemap-cache.json
+
+
+记得在readme里要cite llama的repo, also inspired from call-graph repo
+extension启动的时候要make sure有python，然后要pip install requirements
